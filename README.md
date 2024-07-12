@@ -1,22 +1,32 @@
-# Component-wise censoring paper
-Data simulation and analysis for assessing performance of Cox models for composite endpoints with component-wise censoring
+# Missing Indicator Method paper
+Data simulation and analysis for assessing whether the missing indicator method is beneficial in longitudinal data modeling 
 
-Journal: Clinical Trials 
+Title: Imputation and missing indicators for handling missing longitudinal data: A simulation study based on electronic health record data
 
-Paper link: https://doi.org/10.1177/17407745231177046
-
-Title: Performance of Cox regression models for composite time-to-event endpoints with component-wise censoring in randomized trials 
-
-Authors: Authors: Speiser, Jaime Lynn; Ambrosius, Walter T; Pajewski, Nicholas M.
+Authors: Ehrig, M; Bullock, GS; Leng, X; Pajewski, NM; Speiser, JL
 Department of Biostatistics and Data Science, Wake Forest University School of Medicine, Winston-Salem, NC, USA.
 
-Funding: National Institute on Aging, PRagmatic EValuation of evENTs And Benefits of Lipid-lowering in oldEr adults (PREVENTABLE) trial, Grant number: U19 AG065188. Wake Forest Older Americans Independence Center, Grant Number: P30 AG021332.
+Funding: This project was supported in part by the NIH/NLM (R25 LM014214) in the Department of Biomedical Engineering and Center for Biomedical Informatics at Wake Forest University School of Medicine. Dr. Speiser is supported by the National Institute On Aging of the National Institutes of Health under Award Number K25AG068253. This study was supported in part by the Wake Forest Claude D. Pepper Older Americans Independence Center (P30 AG021332). The content is solely the responsibility of the authors and does not necessarily represent the official views of the National Institutes of Health.
 
-Trial website: www.preventabletrial.org
+Abstract: 
+Introduction: Missing data in electronic health records (EHRs) is highly prevalent and results in analytical concerns such as heterogeneous sources of bias and loss of statistical power. One simple analytic method for addressing missing or unknown covariate values is to treat missing-ness for a particular variable as a category onto itself, which we refer to as the missing indicator method.  For cross-sectional analyses, recent work suggested that there was minimal benefit to the missing indicator method; however, it is unclear how this approach performs in the setting of longitudinal data, in which correlation among clustered repeated measures may be leveraged for potentially improved model performance.  
 
-Abstract: Composite time-to-event endpoints are beneficial for assessing related outcomes jointly in clinical trials, but components of the endpoint may have different censoring mechanisms. For example, in the PRagmatic EValuation of evENTs And Benefits of Lipid-lowering in oldEr adults (PREVENTABLE) trial, one part of the composite outcome is right censored (all-cause mortality), whereas the other part is interval censored (dementia and persistent disability). Although Cox regression is an established method for time-to-event outcomes, it is unclear how models perform under a component-wise censoring scheme for large clinical trial data. The goal of this paper is to conduct a simulation study to investigate the performance of Cox models under different scenarios for composite endpoints with component-wise censoring. We simulate data by varying the strength and direction of the association between treatment and outcome for the two components, the proportion of events arising from the two components of the outcome (right censored and interval censored), and the method for including the interval censored component in the Cox model (upper value and midpoint of the interval). Under these scenarios, we compare the treatment effect estimate bias, confidence interval coverage, and power. Based on the simulation study, Cox models generally have adequate power to detect a significant treatment effect for composite outcomes with component-wise censoring. Performance was similar regardless of if the upper value or midpoint of the interval censored part of the composite outcome was used. 
+Methods: We conducted a simulation study aimed to evaluate whether the missing indicator method improved model performance and imputation accuracy for longitudinal data mimicking an application of developing a clinical prediction model for falls in older adults based on EHR data. We simulated a longitudinal binary outcome using mixed effects logistic regression that emulated a falls assessment at annual follow-up visits. Using multivariate imputation by chained equations, we simulated time-invariant predictors such as sex and medical history, as well as dynamic predictors such as physical function, body mass index, and medication use. We induced missing data in predictors under scenarios that had both random (MAR) and dependent missing-ness (MNAR). We evaluated aggregate performance using the area under the curve for models with and without missing indicators as predictors, as well as complete case analysis, across simulation replicates. We evaluated imputation quality using normalized root mean square error for continuous variables, and percent falsely classified for categorical variables.  
+
+Results: Independent of the mechanism used to simulate missing data (MAR or MNAR), overall model performance via area under the curve was similar regardless of whether missing indicators were included in the model. The root mean square error and percent falsely classified measures were similar for models including missing indicators versus those without missing indicators. Model performance and imputation quality were similar regardless of whether the outcome was related to missingness. Imputation with or without missing indicators had similar mean values of area under the curve compared to complete case analysis, although complete case analysis had the largest range of values. 
+
+Discussion: The results of this study suggest that the inclusion of missing indicators in longitudinal data modeling neither improve nor worsen overall performance or imputation accuracy.  Future research is needed to address whether the inclusion of missing indicators is useful in prediction modeling with longitudinal data in different settings, such as high dimensional data analysis.
+ 
 
 ## Code files
-* data simulation midpt analysis: provides functions for simulating data that use the midpoint of the interval censored component in the composite outcome and aggregating results for different scenarios across the simulation runs
-* data simulation upper value analysis: provides functions for simulating data that use the upper value of the interval censored component in the composite outcome and aggregating results for different scenarios across the simulation runs
-* comparing midpt and upper results: provides code that reads in results files for the different scenarios and produces Bland Altman plots to compare the differences between use of midpoint of the interval versus use of the upper value of the interval in the calculation for the composite outcome
+* MAR draft script v2 20 - MAR missing mechanism, 20% missing data, indicators not included when simulating the outcome; creates "MAR v2 20.csv"
+* MAR draft script v2 50 - MAR missing mechanism, 50% missing data, indicators not included when simulating the outcome; creates "MAR v2 50.csv"
+* MAR draft script v3 20 - MAR missing mechanism, 20% missing data, indicators included when simulating the outcome; creates "MAR v3 20.csv"
+* MAR draft script v3 50 - MAR missing mechanism, 50% missing data, indicators included when simulating the outcome; creates "MAR v3 50.csv"
+* MNAR draft script v2 20 - MNAR missing mechanism, 20% missing data, indicators not included when simulating the outcome; creates "MNAR v2 20.csv"
+* MNAR draft script v2 50 - MNAR missing mechanism, 50% missing data, indicators not included when simulating the outcome; creates "MNAR v2 50.csv"
+* MNAR draft script v3 20 - MNAR missing mechanism, 20% missing data, indicators included when simulating the outcome; creates "MNAR v3 20.csv"
+* MNAR draft script v3 50 - MNAR missing mechanism, 50% missing data, indicators included when simulating the outcome; creates "MAR v3 50.csv"
+* Results script - reads in the results csv files and creates 3 figures found in the paper
+* Results tables - reads in the results csv files and creates supplementary tables
+* Supplemental document updated - creates the supplemental document, which includes summary and descriptive statistics of one simulated dataset
