@@ -1,0 +1,422 @@
+---
+title: "Supplemental document - Variable Summaries"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+date: "2024-06-27"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+# loading packages
+library(bindata)
+library(MASS)
+library(tidyverse)
+library(lme4)
+library(lmerTest)
+library(naniar)
+library(mice)
+library(broom.mixed)
+library(pROC)
+library(DescTools)
+library(table1)
+library(missForest)
+library(writexl)
+library(sjPlot)
+library(psych)
+library(flextable)
+```
+
+```{r}
+set.seed(125) # seed of the first data set 
+```
+
+```{r}
+expit <- function(x) {
+  1 / (1 + exp(-x))
+}
+```
+
+```{r}
+# defining number of patients, visits, and total observations
+n_pat <- 250
+n_vis <- 5
+n_tobs <- n_pat * n_vis
+```
+
+## Data Generation
+
+### Patient Level Binary Variables
+
+The binary patient-level variables birth sex, hypertension, diabetes, dementia, hypertension, and urinary incontinence were first simulated.
+
+```{r}
+  # simulating birth sex, diabetes, dementia, hypertension, and ui
+  
+  # binary correlation matrix
+  matrix2 <- matrix(c(
+    1, -0.15, 0.15, 0.15, 0.15,
+    -0.15, 1, 0.15, 0.15, 0.15,
+    0.15, 0.15, 1, 0.1, 0.15,
+    0.15, 0.15, 0.1, 1, 0.1,
+    0.15, 0.15, 0.15, 0.1, 1
+  ), ncol = 5)
+  
+  
+  df_first <- as.data.frame(rmvbin(
+    n = n_pat, margprob = c(0.5, 0.22, 0.22, 0.7, 0.15), bincorr = matrix2,
+    colnames = c("birth_sex", "diab", "dem", "htn", "ui")
+  ))
+  
+```
+Below is a table of tetrachoric correlation followed by a table of counts for the 250 patients.
+
+```{r}
+  df_exp <- df_first
+
+df_corr_tab = df_first %>% select(birth_sex, ui, htn, dem, diab)
+df_corr = tetrachoric(df_corr_tab)
+df_corr = as.data.frame(df_corr[["rho"]]) %>% mutate_if(is.numeric, round, 3)
+rown = c("Birth sex", "Urinary incontinence", "Hypertension", "Dementia", "Diabetes")
+df_corr = cbind.data.frame(rown, df_corr)
+colnames(df_corr) = c("Variable","Birth sex", "Urinary incontinence", "Hypertension", "Dementia", "Diabetes")
+flextable(df_corr) %>% autofit() %>% bold(part = "header") 
+
+# making the variables factors
+df_exp$birth_sex <- factor(df_exp$birth_sex, levels = c(0, 1), labels = c("Male", "Female"))
+df_exp$diab <- factor(df_exp$diab, levels = c(0, 1), labels = c("No", "Yes"))
+df_exp$dem <- factor(df_exp$dem, levels = c(0, 1), labels = c("No", "Yes"))
+df_exp$htn <- factor(df_exp$htn, levels = c(0, 1), labels = c("No", "Yes"))
+df_exp$ui <- factor(df_exp$ui, levels = c(0, 1), labels = c("No", "Yes"))
+
+label(df_exp$birth_sex) <- "Birth Sex"
+label(df_exp$diab) <- "Diabetes"
+label(df_exp$dem) <- "Dementia"
+label(df_exp$htn) <- "Hypertension"
+label(df_exp$ui) <- "Urinary Incontinence"
+
+table1(~ diab + dem + htn + ui + birth_sex, data = df_exp, topclass = "Rtable1-zebra", caption = "Patient-level Variable Summary")
+```
+
+### Age and Visit-level continuous variables
+
+The patient-level variable age was the simulated, followed by the visit-level variables BMI, gait speed, and single leg balance.  In the below table, the visit-level variables are averaged for each patient.
+
+```{r}
+  df_first <- df_first %>% mutate(n_chronic = diab + dem + htn + ui)
+  
+  # obtaining counts - how many patients have x number of chronic diseases
+  n_zero <- length(df_first$n_chronic[df_first$n_chronic == 0])
+  n_one <- length(df_first$n_chronic[df_first$n_chronic == 1])
+  n_two <- length(df_first$n_chronic[df_first$n_chronic == 2])
+  n_three <- length(df_first$n_chronic[df_first$n_chronic == 3])
+  n_four <- length(df_first$n_chronic[df_first$n_chronic == 4])
+  
+  # creating age variable; distribution based on n_chronic
+  df_first$age <- ifelse(df_first$n_chronic == 0, rnorm(n = n_zero, mean = 76, sd = 4),
+                         ifelse(df_first$n_chronic == 1, rnorm(n = n_one, mean = 78, sd = 4),
+                                ifelse(df_first$n_chronic == 2, rnorm(n = n_two, mean = 80, sd = 4),
+                                       ifelse(df_first$n_chronic == 3, rnorm(n = n_three, mean = 82, sd = 4),
+                                              rnorm(n = n_four, mean = 84, sd = 4)
+                                       )
+                                )
+                         )
+  )
+  
+ # creates patient id and switching to longitudinal format
+  df_first$patient_id <- 1:n_pat
+  df_long <- df_first[rep(seq_len(nrow(df_first)), each = n_vis), ]
+  df_long$visit <- NA
+  df_long$visit <- rep(1:n_vis, n_pat)
+  
+  #--------------------------------------------------------------#
+  
+  # simulating BMI
+  
+  bmi_ran_int_mean <- 0
+  bmi_ran_int_sd <- 2
+  bmi_ran_error_mean <- 0
+  bmi_ran_error_sd <- 1
+  
+  u_0i_bmi <- rnorm(n = n_pat, mean = bmi_ran_int_mean, sd = bmi_ran_int_sd)
+  df_long$u_0i_bmi <- rep(u_0i_bmi, each = n_vis) # random intercept
+  
+  df_long$e_ij_bmi <- rnorm(n = n_tobs, mean = bmi_ran_error_mean, sd = bmi_ran_error_sd) 
+  # random error
+  
+  df_long$BMI <- NA
+  df_long$BMI <- 27 + df_long$u_0i_bmi + 0.01 * df_long$age + 0.9 * df_long$diab +
+    0.5 * df_long$htn - 0.3 * df_long$birth_sex + df_long$e_ij_bmi # defining variable
+  
+  #--------------------------------------------------------------#
+  
+  # simulating GS
+  
+  gs_ran_int_mean <- 0
+  gs_ran_int_sd <- 0.18
+  gs_ran_error_mean <- 0
+  gs_ran_error_sd <- 0.09
+  
+  u_0i_gs <- rnorm(n = n_pat, mean = gs_ran_int_mean, sd = gs_ran_int_sd)
+  df_long$u_0i_gs <- rep(u_0i_gs, each = n_vis) # random intercept
+  
+  df_long$e_ij_gs <- rnorm(n = n_tobs, mean = gs_ran_error_mean, sd = gs_ran_error_sd) 
+  # random error
+  
+  df_long$GS <- NA
+  df_long$GS <- 1.35 + df_long$u_0i_gs - 0.001 * df_long$age - 0.01 * df_long$BMI -
+    0.2 * df_long$diab - 0.2 * df_long$birth_sex + df_long$e_ij_gs # defining variable
+  
+  # setting bounds - cap lower
+  df_long$GS <- ifelse(df_long$GS < 0, 0, df_long$GS)
+  
+  
+  #--------------------------------------------------------------#
+  
+  # simulating SLB
+  
+  slb_ran_int_mean <- 0
+  slb_ran_int_sd <- 4
+  slb_ran_error_mean <- 0
+  slb_ran_error_sd <- 2
+  
+  u_0i_slb <- rnorm(n = n_pat, mean = slb_ran_int_mean, sd = slb_ran_int_sd)
+  df_long$u_0i_slb <- rep(u_0i_slb, each = n_vis) # random intercept
+  
+  
+  df_long$e_ij_slb <- rnorm(n = n_tobs, mean = slb_ran_error_mean, sd = slb_ran_error_sd) 
+  # random error
+  
+  df_long$SLB <- NA
+  df_long$SLB <- 17 + df_long$u_0i_slb - 0.01 * df_long$age - 0.01 * df_long$BMI -
+    0.5 * df_long$diab - 0.5 * df_long$dem - 0.2 * df_long$birth_sex + df_long$e_ij_slb # defining variable
+
+  
+  # setting bounds - cap lower
+  df_long$SLB <- ifelse(df_long$SLB < 0, 0, df_long$SLB)
+  
+    
+  # removing unnecessary variables
+  df_long <- df_long %>% dplyr::select(
+    -n_chronic, -u_0i_slb, -u_0i_gs, -u_0i_bmi,
+    -e_ij_slb, -e_ij_gs, -e_ij_bmi
+  )
+  
+  # rounding BMI, GS, and BMI
+  df_long$age <- round(df_long$age, 0)
+  df_long$BMI <- round(df_long$BMI, 2)
+  df_long$GS <- round(df_long$GS, 2)
+  df_long$SLB <- round(df_long$SLB, 2)
+```
+
+```{r}
+df_exp <- df_long %>%
+  group_by(patient_id) %>%
+  summarize(BMI = mean(BMI), age = mean(age), GS = mean(GS), SLB = mean(SLB))
+
+label(df_exp$age) <- "Age"
+label(df_exp$BMI) <- "BMI"
+label(df_exp$GS) <- "Gait speed"
+label(df_exp$SLB) <- "Single leg balance"
+
+table1(~ age + BMI + GS + SLB, data = df_exp, topclass = "Rtable1-zebra", caption = "Continuous Variable Summary")
+
+
+```
+
+### Medication variables
+
+The visit-level variables pain medication and depression medication were then simulated.
+
+```{r}
+# creating pain medication and depression medication binary variables,
+  # probabilities depend on age, sex, and diabetes
+  
+  # defining random intercept parameters
+  pain_meds_ran_int_mean <- 0
+  pain_meds_ran_int_sd <- .5
+  
+  dep_meds_ran_int_mean <- 0
+  dep_meds_ran_int_sd <- .5
+  
+  # creating random intercept
+  # pain meds
+  u_0i_pain_meds <- rnorm(
+    n = n_pat, mean = pain_meds_ran_int_mean,
+    sd = pain_meds_ran_int_sd
+  )
+  df_long$u_0i_pain_meds <- rep(u_0i_pain_meds, each = n_vis)
+  
+  # depression meds
+  u_0i_dep_meds <- rnorm(
+    n = n_pat, mean = dep_meds_ran_int_mean,
+    sd = dep_meds_ran_int_sd
+  )
+  df_long$u_0i_dep_meds <- rep(u_0i_dep_meds, each = n_vis)
+  
+  
+  df_long$prob_pain_meds <- expit(-1.5 + df_long$u_0i_pain_meds +
+                                    0.7 * df_long$birth_sex + 0.01 * df_long$age +
+                                    0.9 * df_long$diab) 
+  # defining pain medication probability
+  
+  
+  df_long$prob_dep_meds <- expit(-1.5 + df_long$u_0i_dep_meds +
+                                   0.7 * df_long$birth_sex + 0.9 * df_long$dem +
+                                   0.01 * df_long$age) 
+  # defining depression medication probability
+  
+  
+  df_long$pain_meds <- rbinom(n = n_tobs, size = 1, prob = df_long$prob_pain_meds) 
+  # defining pain medication variable
+  df_long$dep_meds <- rbinom(n = n_tobs, size = 1, prob = df_long$prob_dep_meds) 
+  # defining depression medication variable
+  
+  df_exp = df_long %>% group_by(patient_id) %>% summarise(
+    sum_pain_meds = sum(pain_meds), sum_dep_meds = sum(dep_meds),
+    mean_pain_meds = mean(sum_pain_meds), mean_dep_meds = mean(sum_dep_meds)
+  )
+  
+  label(df_exp$mean_pain_meds) <- "Average number of years on pain medication"
+  label(df_exp$mean_dep_meds) <- "Average number of years on depression medication"
+
+table1(~ mean_pain_meds + mean_dep_meds, data = df_exp, topclass = "Rtable1-zebra", caption = "Medication Summary")
+```
+
+### Noise variables
+
+Noise, or junk, variables were simulated.  Their distributions were chosen at random.
+
+```{r}
+ # creating junk variables, parameters chosen at random
+  df_long$junk1 <- rnorm(n = n_tobs, mean = 8, sd = 4)
+  df_long$junk2 <- rnorm(n = n_tobs, mean = 30, sd = 15)
+  df_long$junk3 <- rnorm(n = n_tobs, mean = 100, sd = 10)
+  df_long$junk4 <- rnorm(n = n_tobs, mean = 0, sd = 1)
+  df_long$junk5 <- rnorm(n = n_tobs, mean = 80, sd = 50)
+  
+  df_exp = df_long %>% group_by(patient_id) %>% summarise(mean1 = mean(junk1),
+                                              mean2 = mean(junk2),
+                                              mean3 = mean(junk3),
+                                              mean4 = mean(junk4),
+                                              mean5 = mean(junk5))
+  
+   label(df_exp$mean1) <- "Junk Variable 1"
+   label(df_exp$mean2) <- "Junk Variable 2"
+   label(df_exp$mean3) <- "Junk Variable 3"
+   label(df_exp$mean4) <- "Junk Variable 4"
+   label(df_exp$mean5) <- "Junk Variable 5"
+
+
+table1(~ mean1 + mean2 + mean3 + mean4 + mean5, data = df_exp, topclass = "Rtable1-zebra", caption = "Junk Variable Summary") 
+```
+
+### Outcome simulation
+
+Finally, the outcome variable was simulated.  
+
+```{r}
+# simulating outcome
+  
+  # parameters for random intercept
+  falling_ran_int_mean <- 0
+  falling_ran_int_sd <- 0.6
+  
+  
+  # creating random intercept
+  u_0i_falling <- rnorm(
+    n = n_pat, mean = falling_ran_int_mean,
+    sd = falling_ran_int_sd
+  )
+  df_long$u_0i_falling <- rep(u_0i_falling, each = n_vis)
+  
+  # defining linear predictor
+  RHS <- -6.3 + df_long$u_0i_falling +
+    0.05 * df_long$age + 0.1 * df_long$birth_sex +
+    0.4 * df_long$diab + 0.4 * df_long$dem +
+    0.2 * df_long$htn + 0.4 * df_long$ui + 0.1 * df_long$BMI -
+    0.4 * df_long$GS - 0.05 * df_long$SLB + 0.2 * df_long$pain_meds +
+    0.2 * df_long$dep_meds
+  
+  
+  # defining probability
+  df_long$prob_falling <- expit(RHS)
+  
+  # creating outcome Y
+  df_long$Y <- rbinom(n = n_tobs, size = 1, prob = df_long$prob_falling)
+  
+# histogram of probability
+# ggplot(data = df_long) +
+#   geom_histogram(aes(x = prob_falling)) +
+#   ggtitle("Histogram of Probability of Falling") +
+#   xlab("Probability of Falling") +
+#   theme_minimal()
+
+ggplot(data = df_long) +
+  geom_density(aes(x = prob_falling, group = as.factor(Y), fill = as.factor(Y), alpha = 0.5)) +
+  xlab("Probability of Falling") +
+  scale_fill_discrete(name = "Fall") +
+  scale_alpha(guide = "none") +
+  ggtitle("Probability of Falling Stratified by Falls")
+
+# table of falls
+df_exp2 <- df_long
+df_exp2$Y <- factor(df_exp2$Y, levels = c(0, 1), labels = c("No Fall", "Fall"))
+
+label(df_exp2$Y) <- "Falls"
+table1(~Y, data = df_exp2, topclass = "Rtable1-zebra", caption = "")
+
+
+# making the variables factors
+df_exp2$birth_sex <- factor(df_exp2$birth_sex, levels = c(0, 1), labels = c("Male", "Female"))
+df_exp2$diab <- factor(df_exp2$diab, levels = c(0, 1), labels = c("No Diabetes", "Diabetes"))
+df_exp2$dem <- factor(df_exp2$dem, levels = c(0, 1), labels = c("No Dementia", "Dementia"))
+df_exp2$htn <- factor(df_exp2$htn, levels = c(0, 1), labels = c("No Hypertension", "Hypertension"))
+df_exp2$ui <- factor(df_exp2$ui, levels = c(0, 1), labels = c("No Urinary Incontinence", "Urinary Incontinence"))
+df_exp2$pain_meds <- factor(df_exp2$pain_meds, levels = c(0, 1), labels = c("No", "Yes"))
+df_exp2$dep_meds <- factor(df_exp2$dep_meds, levels = c(0, 1), labels = c("No", "Yes"))
+
+label(df_exp2$pain_meds) <- "Pain Medication"
+label(df_exp2$dep_meds) <- "Depression Medication"
+label(df_exp2$birth_sex) <- "Birth Sex"
+label(df_exp2$diab) <- "Diabetes"
+label(df_exp2$dem) <- "Dementia"
+label(df_exp2$htn) <- "Hypertension"
+label(df_exp2$ui) <- "Urinary Incontinence"
+label(df_exp2$age) <- "Age"
+
+# patient-level table
+table1(~ diab + dem + htn + ui + pain_meds + dep_meds + age + BMI + GS + SLB | Y, data = df_exp2, topclass = "Rtable1-zebra", caption = "Patient Characteristics Stratified by Falls")
+```
+## Modeling
+
+A model summary is listed below.
+
+```{r}
+# getting rid of unnecessary variables and changing binary variables to factors for modeling
+df_model <- df_long %>%
+  mutate(across(
+    c(
+      diab,
+      dem, htn, birth_sex, pain_meds, dep_meds, ui
+    ),
+    factor
+  ))
+
+# running model
+lme.test.Y <- glmer(
+  Y ~ scale(age) + scale(BMI) + scale(GS) + scale(SLB) + birth_sex + diab + dem + htn + ui + pain_meds + dep_meds +
+    scale(junk1) + scale(junk2) + scale(junk3) + scale(junk4) + scale(junk5) + (1 | patient_id),
+  data = df_model,
+  control = glmerControl(optimizer = "bobyqa"),
+  family = "binomial"
+)
+
+tab_model(lme.test.Y, pred.labels = c("Intercept", "Age", "BMI", "Gait speed", "Single leg balance", "Birth sex", "Diabetes", "Dementia", "Hypertension", "Urinary incontience", "Pain medication", "Depression medication","Junk 1", "Junk 2", "Junk 3", "Junk 4", "Junk 5"), dv.labels = "Modeling Falls", file = "supp_table.doc")
+```
+
